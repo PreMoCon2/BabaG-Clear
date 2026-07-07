@@ -23,9 +23,16 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import kotlin.math.roundToInt
 
+// This service is the heart of the app. It watches accessibility events,
+// decides whether the user is actually looking at Recents, renders the branded
+// overlay, and drives the fallback swipe automation when the launcher does not
+// expose its own "Clear all" control.
 class RecentsAccessibilityService : AccessibilityService() {
 
     private val handler = Handler(Looper.getMainLooper())
+    // The watchdog is a second line of defense: if Android misses an exit event
+    // we still force-hide the overlay as soon as the active window stops looking
+    // like a genuine Recents surface.
     private val overlayWatchdog =
         object : Runnable {
             override fun run() {
@@ -55,7 +62,11 @@ class RecentsAccessibilityService : AccessibilityService() {
     private var clearPassCount = 0
     private var clearingInProgress = false
     private var returnHomeAfterClear = false
+    // We keep a short "last seen recents" timestamp so the clear pass can finish
+    // across tiny launcher transitions without instantly aborting.
     private var lastRecentsSignalUptimeMs = 0L
+    // Suppression prevents the overlay from bouncing back during the Home return
+    // transition after a clear run.
     private var overlaySuppressedUntilUptimeMs = 0L
 
     override fun onServiceConnected() {
@@ -63,6 +74,8 @@ class RecentsAccessibilityService : AccessibilityService() {
         windowManager = getSystemService(WindowManager::class.java)
         keyguardManager = getSystemService(KeyguardManager::class.java)
         serviceInfo = serviceInfo.apply {
+            // These flags give us more reliable node ids and multi-window detail,
+            // which makes the Recents heuristics easier to tune per launcher.
             flags =
                 flags or
                     AccessibilityServiceInfo.FLAG_REPORT_VIEW_IDS or
@@ -77,6 +90,8 @@ class RecentsAccessibilityService : AccessibilityService() {
         }
 
         val root = rootInActiveWindow
+        // Exit early on any surface we never want to automate, even if SystemUI
+        // produces noisy events that look vaguely similar to Recents.
         if (!SettingsRepository.isEnabled(this) || isBlockedSurface(root, event.className?.toString().orEmpty())) {
             abortClearRun()
             hideOverlay()
@@ -105,6 +120,8 @@ class RecentsAccessibilityService : AccessibilityService() {
             return
         }
 
+        // The overlay is assembled in code instead of XML because it is small,
+        // highly dynamic, and easier to tweak here while testing different devices.
         val topLabel = TextView(this).apply {
             text = "BabaG"
             setTextColor(Color.parseColor("#71F66B"))
@@ -196,6 +213,7 @@ class RecentsAccessibilityService : AccessibilityService() {
             dp(108),
             dp(108),
             WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
+            // The overlay should be tappable but never steal focus from the launcher.
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
                 WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
             PixelFormat.TRANSLUCENT,
@@ -210,6 +228,8 @@ class RecentsAccessibilityService : AccessibilityService() {
             return
         }
 
+        // A clear pass is stateful: once it starts we gate the overlay text,
+        // remember that we want to return Home, and then step through the task list.
         clearingInProgress = true
         clearPassCount = 0
         returnHomeAfterClear = true
@@ -247,6 +267,8 @@ class RecentsAccessibilityService : AccessibilityService() {
                     return
                 }
 
+                // Prefer the launcher's own action when available because it is
+                // faster and more reliable than our synthetic swipe fallback.
                 if (clickVisibleClearAll(root)) {
                     finishClearRun(delayMs = 350L, returnHome = true)
                     return
@@ -297,6 +319,8 @@ class RecentsAccessibilityService : AccessibilityService() {
     }
 
     private fun setOverlayBusy(busy: Boolean) {
+        // Updating the overlay copy makes it obvious to testers that the tap was
+        // accepted, even if the launcher takes a beat to react.
         overlayTopLabel?.text = if (busy) "BabaG" else "BabaG"
         overlayCenterLabel?.text = if (busy) "SWEEP" else "CLEAR"
         overlayBottomLabel?.text = if (busy) "CLEARING" else "RECENTS"
@@ -319,6 +343,8 @@ class RecentsAccessibilityService : AccessibilityService() {
         return isExplicitRecentsSignal(event, root)
     }
 
+    // Showing the overlay is stricter than clearing. We only show it on explicit
+    // Recents signals so it stays out of Home, notifications, and lock surfaces.
     private fun isExplicitRecentsSignal(
         event: AccessibilityEvent,
         root: AccessibilityNodeInfo?,
@@ -334,6 +360,8 @@ class RecentsAccessibilityService : AccessibilityService() {
         return root?.let(::hasExplicitRecentsMarkers) == true
     }
 
+    // During a clear pass we allow slightly broader detection so the loop can finish
+    // across tiny UI transitions without one missed event killing the run.
     private fun isLikelyRecents(root: AccessibilityNodeInfo): Boolean {
         val packageName = root.packageName?.toString().orEmpty()
         val className = root.className?.toString().orEmpty()
@@ -361,6 +389,9 @@ class RecentsAccessibilityService : AccessibilityService() {
         ) != null
     }
 
+    // Explicit markers are what let the overlay appear in the first place.
+    // These are the safest signals to use when deciding whether the user is
+    // truly on Recents instead of another launcher surface.
     private fun hasExplicitRecentsMarkers(root: AccessibilityNodeInfo): Boolean {
         val packageName = root.packageName?.toString().orEmpty()
         if (packageName !in LAUNCHER_PACKAGES) {
@@ -388,6 +419,8 @@ class RecentsAccessibilityService : AccessibilityService() {
     }
 
     private fun canAttemptClear(root: AccessibilityNodeInfo): Boolean {
+        // The clear pass can continue briefly after one missed signal, but it must
+        // stop immediately on blocked or launcher-like surfaces.
         if (isBlockedSurface(root) || isLauncherSurface(root)) {
             return false
         }
@@ -414,6 +447,8 @@ class RecentsAccessibilityService : AccessibilityService() {
         return clickNodeOrAncestor(node)
     }
 
+    // Many launchers expose a hidden-but-clickable ancestor around the visible
+    // "Clear all" text, so we locate the visible node and then walk upward later.
     private fun findVisibleClearAllNode(root: AccessibilityNodeInfo): AccessibilityNodeInfo? {
         return findFirstNode(root) { candidate ->
             candidate.isVisibleToUser &&
@@ -434,6 +469,8 @@ class RecentsAccessibilityService : AccessibilityService() {
         return target.performAction(AccessibilityNodeInfo.ACTION_DISMISS) || swipeNodeUp(target)
     }
 
+    // The fallback swipe is intentionally centered because several launchers ignore
+    // lower swipes or treat them like drawer/navigation gestures.
     private fun swipeNodeUp(node: AccessibilityNodeInfo): Boolean {
         val bounds = Rect()
         node.getBoundsInScreen(bounds)
@@ -454,6 +491,8 @@ class RecentsAccessibilityService : AccessibilityService() {
     }
 
     private fun swipeAwayFallbackCard(root: AccessibilityNodeInfo): Boolean {
+        // Broad matching is allowed only while explicit Recents markers still exist;
+        // once those disappear we stop instead of swiping Home or the app drawer.
         val allowBroadMatch = hasExplicitRecentsMarkers(root)
         val target =
             findLargestTaskNode(
@@ -487,6 +526,7 @@ class RecentsAccessibilityService : AccessibilityService() {
         node: AccessibilityNodeInfo,
         hints: List<String>,
     ): Boolean {
+        // Text-based checks are useful for button labels and system strings.
         if (node.nodeText().any { text -> hints.any { hint -> text.contains(hint, ignoreCase = true) } }) {
             return true
         }
@@ -505,6 +545,8 @@ class RecentsAccessibilityService : AccessibilityService() {
         node: AccessibilityNodeInfo,
         hints: List<String>,
     ): Boolean {
+        // Class-name/view-id checks are usually more stable than visible text
+        // across OEMs, so we use both where possible.
         val className = node.className?.toString().orEmpty()
         val viewId = node.viewIdResourceName.orEmpty()
         if (className.containsAnyHint(hints) || viewId.containsAnyHint(hints)) {
@@ -525,6 +567,8 @@ class RecentsAccessibilityService : AccessibilityService() {
         node: AccessibilityNodeInfo,
         matcher: (AccessibilityNodeInfo) -> Boolean,
     ): AccessibilityNodeInfo? {
+        // Depth-first search works well enough here because the node trees are
+        // not huge and we care more about early visible matches than ordering.
         if (matcher(node)) {
             return node
         }
@@ -560,6 +604,8 @@ class RecentsAccessibilityService : AccessibilityService() {
         requireDismissAction: Boolean,
         allowBroadMatch: Boolean,
     ): AccessibilityNodeInfo? {
+        // Picking the largest visible candidate biases us toward the foreground
+        // Recents card instead of tiny background thumbnails or action chips.
         val taskNodes = mutableListOf<AccessibilityNodeInfo>()
         collectNodes(root, taskNodes) { node ->
             if (!node.isVisibleToUser || !isLargeEnough(node) || !isTaskLikeNode(node, allowBroadMatch)) {
@@ -585,6 +631,9 @@ class RecentsAccessibilityService : AccessibilityService() {
         node: AccessibilityNodeInfo,
         allowBroadMatch: Boolean,
     ): Boolean {
+        // Strong matches use known class/id/action hints. Broad matches fall back
+        // to centered card-like geometry, which helps on OEM launchers that hide
+        // better metadata from accessibility.
         val className = node.className?.toString().orEmpty()
         val viewId = node.viewIdResourceName.orEmpty()
         val packageName = node.packageName?.toString().orEmpty()
@@ -615,6 +664,8 @@ class RecentsAccessibilityService : AccessibilityService() {
         root: AccessibilityNodeInfo?,
         eventClassName: String = "",
     ): Boolean {
+        // Blocked surfaces are areas where the overlay should never appear or act,
+        // even if SystemUI emits misleading events.
         if (keyguardManager.isKeyguardLocked) {
             return true
         }
@@ -639,6 +690,8 @@ class RecentsAccessibilityService : AccessibilityService() {
     }
 
     private fun isLauncherSurface(root: AccessibilityNodeInfo): Boolean {
+        // Launcher surfaces are the home screen and app drawer. Treating them as
+        // blocked prevents the service from continuing to swipe after Recents ends.
         val packageName = root.packageName?.toString().orEmpty()
         if (packageName !in LAUNCHER_PACKAGES) {
             return false
@@ -660,6 +713,9 @@ class RecentsAccessibilityService : AccessibilityService() {
     }
 
     private fun clickNodeOrAncestor(node: AccessibilityNodeInfo): Boolean {
+        // OEM launchers often place click behavior on a parent container, so we
+        // walk up a few levels instead of requiring the visible label itself to
+        // be clickable.
         var current: AccessibilityNodeInfo? = node
         repeat(6) {
             val target = current ?: return false
@@ -672,6 +728,8 @@ class RecentsAccessibilityService : AccessibilityService() {
     }
 
     private fun isLargeEnough(node: AccessibilityNodeInfo): Boolean {
+        // Tiny nodes are usually buttons, chips, or thumbnails, not the main
+        // task card we want to dismiss.
         val bounds = Rect()
         node.getBoundsInScreen(bounds)
         val widthThreshold = resources.displayMetrics.widthPixels * 0.22f
@@ -696,6 +754,8 @@ class RecentsAccessibilityService : AccessibilityService() {
     }
 
     companion object {
+        // These values are the first place to tune when a new launcher clears too
+        // slowly, too aggressively, or keeps false-matching the wrong surface.
         private const val MAX_CLEAR_PASSES = 18
         private const val PASS_DELAY_MS = 140L
         private const val RECENTS_SIGNAL_GRACE_MS = 900L

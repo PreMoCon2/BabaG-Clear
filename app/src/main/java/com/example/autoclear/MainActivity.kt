@@ -65,6 +65,8 @@ import com.example.autoclear.ui.theme.Graphite
 import com.example.autoclear.ui.theme.MintGlow
 import com.example.autoclear.ui.theme.SlatePanel
 
+// MainActivity is intentionally lightweight: it owns the Compose UI and mirrors
+// service state, but all Recents automation lives in the AccessibilityService.
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -89,10 +91,14 @@ private fun AutoClearScreen() {
     val lifecycleOwner = LocalLifecycleOwner.current
     val settingsRepository = remember(context) { SettingsRepository(context) }
 
+    // The screen reads the same feature flag the service uses, so toggling here
+    // immediately changes runtime behavior without any extra sync layer.
     var featureEnabled by remember { mutableStateOf(settingsRepository.isEnabled()) }
     var serviceEnabled by remember { mutableStateOf(isAccessibilityServiceEnabled(context)) }
 
     DisposableEffect(lifecycleOwner, context) {
+        // Accessibility settings live outside our process, so we refresh state
+        // whenever the activity returns to the foreground.
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) {
                 featureEnabled = settingsRepository.isEnabled()
@@ -118,6 +124,9 @@ private fun AutoClearScreen() {
             ),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
+            // The list is split into obvious setup sections because most users
+            // reach this screen only when they are enabling permissions or
+            // troubleshooting the overlay.
             item {
                 HeroCard(
                     featureEnabled = featureEnabled,
@@ -179,6 +188,8 @@ private fun HeroCard(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
+                    // Reuse the launcher-brand image in the app UI so the GitHub
+                    // README, launcher icon, and settings screen all share one mark.
                     Image(
                         painter = painterResource(id = R.drawable.babag_clear_launcher_foreground),
                         contentDescription = "BabaG Clear logo",
@@ -261,6 +272,7 @@ private fun ToggleCard(
                 checked = enabled,
                 onCheckedChange = onToggle,
                 colors = SwitchDefaults.colors(
+                    // Keep the toggle colors aligned with the overlay accent.
                     checkedThumbColor = Graphite,
                     checkedTrackColor = MintGlow,
                 ),
@@ -315,6 +327,8 @@ private fun SetupCard(
             )
 
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                // Both actions intentionally point to settings. Users often use the
+                // second button after changing permissions outside the app.
                 Button(onClick = onOpenAccessibility) {
                     Text("Open accessibility settings")
                 }
@@ -368,6 +382,7 @@ private fun StepRow(
     step: String,
     text: String,
 ) {
+    // Small numbered rows keep the onboarding path obvious for developers and users.
     Row(
         modifier = Modifier.fillMaxWidth(),
         verticalAlignment = Alignment.Top,
@@ -402,6 +417,7 @@ private fun StatusChip(
     label: String,
     active: Boolean,
 ) {
+    // These chips are intentionally visual-only summaries, not toggles.
     val background = if (active) {
         MintGlow.copy(alpha = 0.16f)
     } else {
@@ -428,6 +444,8 @@ private fun StatusChip(
 }
 
 private fun isAccessibilityServiceEnabled(context: Context): Boolean {
+    // Android stores enabled accessibility services in a flattened colon-separated
+    // setting, so we compare against our fully qualified component name.
     val enabledServices = Settings.Secure.getString(
         context.contentResolver,
         Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES,

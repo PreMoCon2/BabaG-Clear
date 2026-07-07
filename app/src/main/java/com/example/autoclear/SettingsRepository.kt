@@ -2,12 +2,15 @@ package com.example.autoclear
 
 import android.content.Context
 
+// Small shared-preferences wrapper used by both the Compose UI and the
+// AccessibilityService so they read the same on/off flag.
 class SettingsRepository(context: Context) {
 
     private val appContext = context.applicationContext
     private val preferences =
         appContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
 
+    // Default to enabled so first-run behavior matches the original app goal.
     fun isEnabled(): Boolean = preferences.getBoolean(KEY_FEATURE_ENABLED, true)
 
     fun setEnabled(enabled: Boolean) {
@@ -18,6 +21,8 @@ class SettingsRepository(context: Context) {
         private const val PREFS_NAME = "auto_clear_preferences"
         private const val KEY_FEATURE_ENABLED = "feature_enabled"
 
+        // Static-style helper for service code paths where creating a repository
+        // instance would add noise without giving us any extra value.
         fun isEnabled(context: Context): Boolean {
             return context.applicationContext
                 .getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)

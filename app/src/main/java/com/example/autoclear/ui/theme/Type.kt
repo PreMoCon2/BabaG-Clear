@@ -6,6 +6,8 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
 
+// Typography stays intentionally simple so the accessibility setup content is
+// readable, while labels still get a slightly more technical/terminal flavor.
 val Typography = Typography(
     headlineMedium = TextStyle(
         fontFamily = FontFamily.SansSerif,
