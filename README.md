@@ -1,4 +1,6 @@
-![BabaG Clear](docs/branding/babag-clear-logo.png)
+<p align="center">
+  <img src="docs/branding/babag-clear-logo.png" alt="BabaG Clear" width="180" />
+</p>
 
 # BabaG Clear
 
