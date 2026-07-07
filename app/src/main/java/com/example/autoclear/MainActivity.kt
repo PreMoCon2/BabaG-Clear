@@ -34,6 +34,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
@@ -59,6 +60,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
+import kotlin.math.roundToInt
 import com.example.autoclear.ui.theme.AutoClearTheme
 import com.example.autoclear.ui.theme.DeepAqua
 import com.example.autoclear.ui.theme.Graphite
@@ -94,6 +96,7 @@ private fun AutoClearScreen() {
     // The screen reads the same feature flag the service uses, so toggling here
     // immediately changes runtime behavior without any extra sync layer.
     var featureEnabled by remember { mutableStateOf(settingsRepository.isEnabled()) }
+    var speedMultiplier by remember { mutableStateOf(settingsRepository.getSpeedMultiplier()) }
     var serviceEnabled by remember { mutableStateOf(isAccessibilityServiceEnabled(context)) }
 
     DisposableEffect(lifecycleOwner, context) {
@@ -102,6 +105,7 @@ private fun AutoClearScreen() {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) {
                 featureEnabled = settingsRepository.isEnabled()
+                speedMultiplier = settingsRepository.getSpeedMultiplier()
                 serviceEnabled = isAccessibilityServiceEnabled(context)
             }
         }
@@ -140,6 +144,16 @@ private fun AutoClearScreen() {
                     onToggle = { enabled ->
                         featureEnabled = enabled
                         settingsRepository.setEnabled(enabled)
+                    },
+                )
+            }
+
+            item {
+                SpeedCard(
+                    speedMultiplier = speedMultiplier,
+                    onSpeedChanged = { multiplier ->
+                        speedMultiplier = multiplier
+                        settingsRepository.setSpeedMultiplier(multiplier)
                     },
                 )
             }
@@ -276,6 +290,54 @@ private fun ToggleCard(
                     checkedThumbColor = Graphite,
                     checkedTrackColor = MintGlow,
                 ),
+            )
+        }
+    }
+}
+
+@Composable
+private fun SpeedCard(
+    speedMultiplier: Int,
+    onSpeedChanged: (Int) -> Unit,
+) {
+    Card(
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(20.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+            Text(
+                text = "Clear speed",
+                style = MaterialTheme.typography.titleLarge,
+            )
+
+            Text(
+                text = "Choose how aggressively BabaG Clear runs its swipe loop. Higher values clear faster.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+
+            Text(
+                text = "${speedMultiplier}x",
+                style = MaterialTheme.typography.displaySmall,
+                color = MintGlow,
+                fontWeight = FontWeight.Bold,
+            )
+
+            Slider(
+                value = speedMultiplier.toFloat(),
+                onValueChange = { rawValue -> onSpeedChanged(rawValue.roundToInt()) },
+                valueRange = 1f..10f,
+                steps = 8,
+            )
+
+            Text(
+                text = "1x is slowest and 10x is fastest.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
     }

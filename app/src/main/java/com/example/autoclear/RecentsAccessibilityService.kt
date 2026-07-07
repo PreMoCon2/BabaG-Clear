@@ -21,6 +21,7 @@ import android.view.accessibility.AccessibilityNodeInfo
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.TextView
+import kotlin.math.max
 import kotlin.math.roundToInt
 
 // This service is the heart of the app. It watches accessibility events,
@@ -250,7 +251,7 @@ class RecentsAccessibilityService : AccessibilityService() {
                 if (root == null) {
                     clearPassCount += 1
                     if (clearPassCount < MAX_CLEAR_PASSES) {
-                        handler.postDelayed(this, PASS_DELAY_MS)
+                        handler.postDelayed(this, scaledDelay(PASS_DELAY_MS, MIN_PASS_DELAY_MS))
                     } else {
                         finishClearRun(returnHome = true)
                     }
@@ -270,7 +271,10 @@ class RecentsAccessibilityService : AccessibilityService() {
                 // Prefer the launcher's own action when available because it is
                 // faster and more reliable than our synthetic swipe fallback.
                 if (clickVisibleClearAll(root)) {
-                    finishClearRun(delayMs = 350L, returnHome = true)
+                    finishClearRun(
+                        delayMs = scaledDelay(CLEAR_ALL_SETTLE_DELAY_MS, MIN_CLEAR_ALL_SETTLE_DELAY_MS),
+                        returnHome = true,
+                    )
                     return
                 }
 
@@ -278,7 +282,7 @@ class RecentsAccessibilityService : AccessibilityService() {
                 clearPassCount += 1
 
                 if (handled && clearPassCount < MAX_CLEAR_PASSES) {
-                    handler.postDelayed(this, PASS_DELAY_MS)
+                    handler.postDelayed(this, scaledDelay(PASS_DELAY_MS, MIN_PASS_DELAY_MS))
                 } else {
                     finishClearRun(returnHome = true)
                 }
@@ -516,10 +520,26 @@ class RecentsAccessibilityService : AccessibilityService() {
 
         val gesture =
             GestureDescription.Builder()
-                .addStroke(GestureDescription.StrokeDescription(path, 0L, 160L))
+                .addStroke(
+                    GestureDescription.StrokeDescription(
+                        path,
+                        0L,
+                        scaledDelay(SWIPE_DURATION_MS, MIN_SWIPE_DURATION_MS),
+                    ),
+                )
                 .build()
 
         return dispatchGesture(gesture, null, null)
+    }
+
+    // The slider is presented as 1x-10x, but we clamp the actual timing floors
+    // so the gesture still looks human enough for Android to accept reliably.
+    private fun scaledDelay(
+        baseDelayMs: Long,
+        minimumDelayMs: Long,
+    ): Long {
+        val multiplier = max(1, SettingsRepository.getSpeedMultiplier(this))
+        return max(minimumDelayMs, baseDelayMs / multiplier)
     }
 
     private fun containsAnyText(
@@ -757,7 +777,12 @@ class RecentsAccessibilityService : AccessibilityService() {
         // These values are the first place to tune when a new launcher clears too
         // slowly, too aggressively, or keeps false-matching the wrong surface.
         private const val MAX_CLEAR_PASSES = 18
-        private const val PASS_DELAY_MS = 140L
+        private const val PASS_DELAY_MS = 90L
+        private const val MIN_PASS_DELAY_MS = 24L
+        private const val SWIPE_DURATION_MS = 110L
+        private const val MIN_SWIPE_DURATION_MS = 45L
+        private const val CLEAR_ALL_SETTLE_DELAY_MS = 220L
+        private const val MIN_CLEAR_ALL_SETTLE_DELAY_MS = 90L
         private const val RECENTS_SIGNAL_GRACE_MS = 900L
         private const val OVERLAY_SUPPRESSION_MS = 1800L
         private const val OVERLAY_WATCHDOG_MS = 250L
