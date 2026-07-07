@@ -1,0 +1,7 @@
+<resources>
+    <string name="app_name">BabaG Clear</string>
+    <string name="accessibility_service_label">BabaG Clear Recents Helper</string>
+    <string name="accessibility_service_description">Shows a Clear recents button over the Recents screen and tries to clear recent apps for you.</string>
+    <string name="clear_recents_action">Clear recents</string>
+    <string name="clearing_recents_action">Clearing...</string>
+</resources>
